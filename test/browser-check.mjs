@@ -144,6 +144,30 @@ try
     check("loaded pattern has cells", parseInt((await ev("$('label_pop').textContent")).replace(/\D/g, "")) > 0, await ev("$('pattern_name').textContent"));
     await shot("pattern");
 
+    // --- URL stays on this site: only the query changes, and Clear keeps the path
+    const base = "http://127.0.0.1:" + PORT + "/index.html";
+    check("loading a pattern only adds ?pattern= to the URL", await ev("location.href") === base + "?pattern=gunstar", await ev("location.href"));
+    await ev("$('alert_close').click(); $('clear_button').click()");
+    check("Clear keeps the page path (upstream rewrote it to /life/)", await ev("location.href") === base, await ev("location.href"));
+
+    // --- pattern info links point at this site and resolve
+    await ev("$('pattern_button').click()");
+    await sleep(1000);
+    await ev("$('pattern_list').children[3].click()");
+    await sleep(2500);
+    await ev("$('alert_close').click(); $('pattern_name').click()");
+    check("pattern name opens the pattern info", await display("alert") === "block");
+    const links = await json("({file: $('pattern_file_link').href, view: $('pattern_link').href, urls: [...$('pattern_urls').querySelectorAll('a')].map(a => a.href)})");
+    check("pattern file link points at this site", links.file === "http://127.0.0.1:" + PORT + "/examples/gunstar.rle", links.file);
+    check("pattern file link resolves", (await fetch(links.file)).status === 200);
+    check("view-online link points at this site", links.view === base + "?pattern=gunstar", links.view);
+    check("comment links get a scheme instead of becoming local paths", links.urls.length > 0 && links.urls.every(u => /^https?:\/\/(?!127\.0\.0\.1)/.test(u)), links.urls.join(" "));
+
+    // --- a refresh with ?pattern= reloads that pattern
+    await send("Page.navigate", { url: base + "?pattern=gunstar" });
+    await sleep(3000);
+    check("refresh with ?pattern= reloads the pattern", await ev("$('pattern_name').textContent") === "Gunstar", await ev("$('pattern_name').textContent"));
+
     ws.close();
 }
 catch(e)

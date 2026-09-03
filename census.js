@@ -5,14 +5,17 @@
  * objects and names any object that matches a known Game of Life shape
  * (still life, oscillator phase, or spaceship phase).
  *
- * Grouping happens in two passes. First, cells within two steps of each
- * other (so, bridging one empty cell) form a "loose" group; if the whole
- * group is a known object it is named as one -- this is what lets a
- * pulsar, whose four arms never touch, or a beacon in its split phase be
- * counted as one object. A loose group that is not a known object is
- * split into the pieces that actually touch (8-connected), and each
- * piece is named on its own or reported as "other, N cells". Two blocks
- * with a one-cell gap therefore still count as two blocks.
+ * Grouping happens in passes. First, cells within three steps of each
+ * other (so, bridging up to two empty cells) form a "loose" group; if
+ * the whole group is a known object it is named as one -- this is what
+ * lets a pulsar, whose four arms never touch, or a beacon in its split
+ * phase be counted as one object. Two unnamed groups that sit close
+ * together are then tried as one object (the pentadecathlon spends two
+ * of its 15 phases as two halves six cells apart). What is still
+ * unnamed is regrouped more tightly, down to the pieces that actually
+ * touch (8-connected), and each piece is named on its own or reported
+ * as "other, N cells". Two blocks with a one-cell gap therefore still
+ * count as two blocks.
  *
  * Plain ES5/ES6. No dependencies. Works as a <script> in the browser
  * (exposes window.Census) and via require() in Node (module.exports).
@@ -168,6 +171,15 @@
         return components;
     }
 
+    // Reach of the first, loose grouping pass: cells within three steps
+    // (up to two empty cells between them) belong to one group.
+    var LIBRARY_REACH = 3;
+
+    // A known object may also be two separated groups. Pairs of unnamed
+    // groups whose bounding boxes are at most this many cells apart are
+    // tried together.
+    var PAIR_GAP = 8;
+
     // Strict grouping: 8-connected (king-move) components, cells that touch.
     // Accepts either an array of {x,y} or two parallel arrays.
     function connectedComponents(cellsOrX, maybeY)
@@ -175,10 +187,34 @@
         return groupCells(toCellArray(cellsOrX, maybeY), 1);
     }
 
-    // Loose grouping: cells within two steps, bridging one empty cell.
+    // Loose grouping at the library reach.
     function looseComponents(cellsOrX, maybeY)
     {
-        return groupCells(toCellArray(cellsOrX, maybeY), 2);
+        return groupCells(toCellArray(cellsOrX, maybeY), LIBRARY_REACH);
+    }
+
+    function boundingBox(cells)
+    {
+        var box = { minX: Infinity, minY: Infinity, maxX: -Infinity, maxY: -Infinity };
+
+        for(var i = 0; i < cells.length; i++)
+        {
+            if(cells[i].x < box.minX) box.minX = cells[i].x;
+            if(cells[i].y < box.minY) box.minY = cells[i].y;
+            if(cells[i].x > box.maxX) box.maxX = cells[i].x;
+            if(cells[i].y > box.maxY) box.maxY = cells[i].y;
+        }
+
+        return box;
+    }
+
+    // Empty cells between two bounding boxes (0 when they touch or overlap).
+    function boxGap(a, b)
+    {
+        var gx = Math.max(a.minX - b.maxX, b.minX - a.maxX) - 1;
+        var gy = Math.max(a.minY - b.maxY, b.minY - a.maxY) - 1;
+
+        return Math.max(gx, gy, 0);
     }
 
     function toCellArray(cellsOrX, maybeY)
@@ -264,9 +300,9 @@
     // stepping the reference implementation forward. Stops when a phase's
     // canonical key repeats one already seen (oscillators/spaceships), or
     // after maxPeriod steps. A phase is only recorded when the pattern is
-    // a single loose group (every cell within two steps of another); a
-    // phase that spreads further apart is skipped and left unnamed.
-    // Returns [{ key, size }].
+    // one loose group, or two loose groups within PAIR_GAP of each other;
+    // a phase that spreads further apart is skipped and left unnamed.
+    // Returns [{ key, size, pieces }].
     function buildPhases(seedCells, maxPeriod)
     {
         var phases = [];
@@ -276,10 +312,12 @@
         for(var i = 0; i < maxPeriod; i++)
         {
             var groups = looseComponents(cells);
+            var usable = groups.length === 1 ||
+                (groups.length === 2 && boxGap(boundingBox(groups[0]), boundingBox(groups[1])) <= PAIR_GAP);
 
-            if(groups.length === 1)
+            if(usable)
             {
-                var k = canonicalKey(groups[0]);
+                var k = canonicalKey(cells);
 
                 if(seen.has(k))
                 {
@@ -287,7 +325,7 @@
                 }
 
                 seen.add(k);
-                phases.push({ key: k, size: groups[0].length });
+                phases.push({ key: k, size: cells.length, pieces: groups.length });
             }
 
             cells = stepCells(cells);
@@ -363,6 +401,13 @@
             { x: 0, y: 0 }, { x: 1, y: 0 }, { x: 0, y: 1 },
             { x: 3, y: 2 }, { x: 2, y: 3 }, { x: 3, y: 3 }
         ] },
+        // period 15; in two phases it is two halves six cells apart, which
+        // the pair rule in census() joins back together
+        { name: "pentadecathlon", period: 30, cells: cellsFromRows([
+            "..O....O..",
+            "OO.OOOO.OO",
+            "..O....O.."
+        ]) },
         // period 3; its four arms never touch, so it is only one object
         // thanks to loose grouping
         { name: "pulsar", period: 6, cells: cellsFromRows([
@@ -399,11 +444,6 @@
             "OOOO."
         ]) }
 
-        // NOTE: the pentadecathlon (period 15) is deliberately absent.
-        // In some of its phases the cells spread into two to four loose
-        // groups, so it could only be named in some phases. It is
-        // reported under "other" and "run until settled" copes with it
-        // through the cycle check in settledCycle below.
     ];
 
     var LIBRARY = new Map(); // canonicalKey -> name
@@ -478,12 +518,11 @@
             gen = generation;
         }
 
-        var groups = looseComponents(cells);
-
         var speciesCounts = new Map(); // name -> count
         var otherCounts = new Map();   // cell count -> count
         var unidentifiedCells = 0;
         var namedCells = 0;
+        var i, j, name;
 
         function countNamed(name, size)
         {
@@ -497,41 +536,88 @@
             unidentifiedCells += size;
         }
 
-        for(var i = 0; i < groups.length; i++)
+        // A group that is not a known object at this reach: regroup it
+        // more tightly, name what falls out, and repeat down to the
+        // pieces that actually touch.
+        function classifyPieces(group, reach)
         {
-            var group = groups[i];
-            var name = lookupName(group);
+            while(reach > 1)
+            {
+                reach--;
+
+                var pieces = groupCells(group, reach);
+
+                if(pieces.length > 1)
+                {
+                    for(var p = 0; p < pieces.length; p++)
+                    {
+                        var pieceName = lookupName(pieces[p]);
+
+                        if(pieceName)
+                        {
+                            countNamed(pieceName, pieces[p].length);
+                        }
+                        else
+                        {
+                            classifyPieces(pieces[p], reach);
+                        }
+                    }
+
+                    return;
+                }
+            }
+
+            countOther(group.length);
+        }
+
+        // pass 1: loose groups that are a known object as a whole
+        var groups = groupCells(cells, LIBRARY_REACH);
+        var unnamed = [];
+
+        for(i = 0; i < groups.length; i++)
+        {
+            name = lookupName(groups[i]);
 
             if(name)
             {
-                countNamed(name, group.length);
-                continue;
+                countNamed(name, groups[i].length);
             }
-
-            // Not a known object as a whole: fall back to the pieces that
-            // actually touch and name each of those on its own.
-            var pieces = groupCells(group, 1);
-
-            if(pieces.length === 1)
+            else
             {
-                // same cells as the group, already known to be unnamed
-                countOther(group.length);
-                continue;
+                unnamed.push(groups[i]);
             }
+        }
 
-            for(var j = 0; j < pieces.length; j++)
+        // pass 2: two close unnamed groups that are a known object together
+        var boxes = unnamed.map(boundingBox);
+        var taken = unnamed.map(function() { return false; });
+
+        for(i = 0; i < unnamed.length; i++)
+        {
+            for(j = i + 1; j < unnamed.length && !taken[i]; j++)
             {
-                var piece = pieces[j];
-                var pieceName = lookupName(piece);
+                if(taken[j] || unnamed[i].length + unnamed[j].length > LIBRARY_MAX_CELLS ||
+                    boxGap(boxes[i], boxes[j]) > PAIR_GAP)
+                {
+                    continue;
+                }
 
-                if(pieceName)
+                name = lookupName(unnamed[i].concat(unnamed[j]));
+
+                if(name)
                 {
-                    countNamed(pieceName, piece.length);
+                    countNamed(name, unnamed[i].length + unnamed[j].length);
+                    taken[i] = taken[j] = true;
                 }
-                else
-                {
-                    countOther(piece.length);
-                }
+            }
+        }
+
+        // pass 3: everything else, regrouped more tightly
+        for(i = 0; i < unnamed.length; i++)
+        {
+            if(!taken[i])
+            {
+                classifyPieces(unnamed[i], LIBRARY_REACH);
             }
         }
 
@@ -637,6 +723,9 @@
     return {
         connectedComponents: connectedComponents,
         looseComponents: looseComponents,
+        groupCells: groupCells,
+        libraryReach: LIBRARY_REACH,
+        pairGap: PAIR_GAP,
         canonicalKey: canonicalKey,
         cellsFromRows: cellsFromRows,
         stepCells: stepCells,

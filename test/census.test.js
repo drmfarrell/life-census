@@ -101,6 +101,7 @@ var LIBRARY_TEST_PATTERNS = {
         ".............",
         "..OOO...OOO.."
     ]), period: 3 },
+    "pentadecathlon": { seed: Census.cellsFromRows(["..O....O..", "OO.OOOO.OO", "..O....O.."]), period: 15 },
     // spaceships: after one period the seed reappears shifted by `shift`
     "glider":  { seed: [{x:1,y:0},{x:2,y:1},{x:0,y:2},{x:1,y:2},{x:2,y:2}], period: 4, shift: {x: 1, y: 1} },
     "lightweight spaceship": { seed: Census.cellsFromRows([".O..O", "O....", "O...O", "OOOO."]), period: 4, shift: {x: -2, y: 0} }
@@ -110,6 +111,7 @@ var BLOCK = LIBRARY_TEST_PATTERNS.block.seed;
 var BEEHIVE = LIBRARY_TEST_PATTERNS.beehive.seed;
 var BLINKER = LIBRARY_TEST_PATTERNS.blinker.seed;
 var PULSAR = LIBRARY_TEST_PATTERNS.pulsar.seed;
+var PENTADECATHLON = LIBRARY_TEST_PATTERNS.pentadecathlon.seed;
 
 function countsByName(result)
 {
@@ -154,20 +156,20 @@ Object.keys(LIBRARY_TEST_PATTERNS).forEach(function(name)
 
     for(var step = 0; step < def.period; step++)
     {
-        // every phase of a library object must be one loose group
-        // (all cells within two steps of another), so it is named as
-        // one object even where its pieces do not touch
+        // every phase of a library object must be one loose group, or
+        // two close ones (the pentadecathlon's halves), so it is named
+        // as one object even where its pieces do not touch
         var groups = Census.looseComponents(cells);
 
-        assert(groups.length === 1, name + " phase " + step + " should be one loose group (got " + groups.length + ")");
+        assert(groups.length <= 2, name + " phase " + step + " should be at most two loose groups (got " + groups.length + ")");
 
-        if(groups.length === 1)
+        if(groups.length <= 2)
         {
             phasesChecked++;
 
             ORIENTATIONS.forEach(function(fn)
             {
-                var oriented = orient(groups[0], fn);
+                var oriented = orient(cells, fn);
                 var result = Census.census(oriented, 0);
 
                 assert(result.species.length === 1 && result.species[0].name === name && result.species[0].count === 1,
@@ -264,6 +266,40 @@ console.log("-- pulsar is one object in every phase and does not inflate other c
     }
 })();
 
+console.log("-- pentadecathlon: one object even when its halves are six cells apart --");
+
+(function()
+{
+    var cells = PENTADECATHLON;
+    var splitPhases = 0;
+
+    for(var phase = 0; phase < 15; phase++)
+    {
+        var groups = Census.looseComponents(cells);
+
+        if(groups.length === 2)
+        {
+            splitPhases++;
+
+            // a lone half is not named
+            var half = Census.census(groups[0], 0);
+            assert(half.species.length === 0 && half.unidentified_cells === groups[0].length,
+                "half a pentadecathlon (phase " + phase + ") should not be named (got: " + JSON.stringify(half.species) + ")");
+
+            // a block beyond the grouping reach but inside the pair gap
+            // does not stop the halves from being joined
+            var r = Census.census(cells.concat(translate(BLOCK, -7, 0)), 0);
+            var byName = countsByName(r);
+            assert(byName.pentadecathlon === 1 && byName.block === 1 && r.unidentified_cells === 0,
+                "pentadecathlon phase " + phase + " with a block 5 cells away: expected pentadecathlon 1, block 1 (got: " + JSON.stringify(r) + ")");
+        }
+
+        cells = Census.stepCells(cells);
+    }
+
+    assert(splitPhases === 2, "the pentadecathlon should have exactly two split phases (got " + splitPhases + ")");
+})();
+
 // ---- settled detection: unchanged counts, short cycles, still changing ----
 
 console.log("-- settledCycle and stableRun --");
@@ -313,9 +349,35 @@ console.log("-- settledCycle and stableRun --");
 
     assert(Census.settledCycle(history, W, MAXC) === 1, "pulsar + beacon should settle with cycle 1 (got " + Census.settledCycle(history, W, MAXC) + ")");
 
-    // an oscillator the library does not know: the pentadecathlon (period 15)
-    // seen every 10 generations cycles through 3 distinct phases
-    field = Census.cellsFromRows(["..O....O..", "OO.OOOO.OO", "..O....O.."]);
+    // a pentadecathlon (period 15, named in every phase) also settles with cycle 1
+    field = translate(PENTADECATHLON, 100, 100);
+    history = [];
+
+    for(g = 1; g <= 400; g++)
+    {
+        field = Census.stepCells(field);
+
+        if(g % 10 === 0)
+        {
+            history.push(Census.signature(Census.census(field, g)));
+        }
+    }
+
+    assert(Census.settledCycle(history, W, MAXC) === 1, "a pentadecathlon should settle with cycle 1 (got " + Census.settledCycle(history, W, MAXC) + ")");
+
+    // an oscillator the library does not know: the figure eight (period 8)
+    // seen every 10 generations cycles through 4 distinct phases
+    var figureEight = Census.cellsFromRows(["OOO...", "OOO...", "OOO...", "...OOO", "...OOO", "...OOO"]);
+    field = figureEight;
+
+    for(g = 1; g <= 8; g++)
+    {
+        field = Census.stepCells(field);
+    }
+
+    assert(cellsEqual(field, figureEight), "figure eight should return to its seed after 8 generations");
+    assert(Census.census(figureEight, 0).species.length === 0, "figure eight should not be in the library");
+
     history = [];
 
     for(g = 1; g <= 400; g++)
@@ -329,8 +391,8 @@ console.log("-- settledCycle and stableRun --");
     }
 
     var cycle = Census.settledCycle(history, W, MAXC);
-    assert(cycle === 3, "a pentadecathlon should settle with a 3-check cycle (got " + cycle + ")");
-    assert(Census.settledCycle(history, W, 1) === 0, "a pentadecathlon never settles when only cycle 1 is allowed");
+    assert(cycle === 4, "a figure eight should settle with a 4-check cycle (got " + cycle + ")");
+    assert(Census.settledCycle(history, W, 3) === 0, "a figure eight never settles when the cycle may be at most 3 checks");
 })();
 
 // ---- 2. mixed field: 3 blocks + 2 blinkers (each phase) + 1 glider + 1 beehive ----

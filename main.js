@@ -1360,21 +1360,20 @@ var
             id = id + ".rle";
         }
 
-        if(!absolute || location.hostname === "localhost")
+        // the pattern files live beside this page, on whatever host or
+        // file:// path it is served from (upstream linked to copy.sh)
+        if(!absolute)
         {
             return pattern_path + id;
         }
-        else
-        {
-            let protocol = location.protocol === "http:" ? "http:" : "https:";
-            return protocol + "//copy.sh/life/" + pattern_path + id;
-        }
+
+        return new URL(pattern_path + id, location.href).href;
     }
 
+    // Link to open this pattern on this site (upstream linked to copy.sh).
     function view_link(id)
     {
-        let protocol = location.protocol === "http:" ? "http:" : "https:";
-        return protocol + "//copy.sh/life/?pattern=" + id;
+        return location.href.split(/[?#]/)[0] + "?pattern=" + id;
     }
 
     /**
@@ -1641,7 +1640,9 @@ var
             for(let url of pattern.urls)
             {
                 let a = document.createElement("a");
-                a.href = url;
+                // pattern comments often give a bare "www.conwaylife.com/..."
+                // -- without a scheme the browser would treat it as a local path
+                a.href = /^[a-z][a-z0-9+.\-]*:/i.test(url) ? url : "https://" + url;
                 a.textContent = url;
                 a.target = "_blank";
                 $("pattern_urls").appendChild(a);
@@ -1908,6 +1909,9 @@ var
         return document.getElementById(id);
     }
 
+    // Keep the browser URL in step with the loaded pattern. Upstream
+    // rewrote the path to its own "/life/", which 404s on any other
+    // host after a refresh; this fork keeps whatever path the page has.
     function set_query(filename)
     {
         if(!window.history.replaceState)
@@ -1915,13 +1919,20 @@ var
             return;
         }
 
-        if(filename)
+        try
         {
-            window.history.replaceState(null, "", "?pattern=" + filename);
+            if(filename)
+            {
+                window.history.replaceState(null, "", "?pattern=" + filename);
+            }
+            else
+            {
+                window.history.replaceState(null, "", location.pathname);
+            }
         }
-        else
+        catch(e)
         {
-            window.history.replaceState(null, "", "/life/");
+            // file:// in some browsers: leave the URL alone
         }
     }
 
