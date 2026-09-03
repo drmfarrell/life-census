@@ -887,11 +887,9 @@ var
             }
 
             var CENSUS_NOTE_DEFAULT =
-                "\"Settled\" means the counts have not changed for 200 generations in a row. " +
-                "Gliders never stop on an infinite field, so a settled field can still have " +
-                "gliders flying across it. Beacon and toad each have a phase where their six " +
-                "cells split into two separate pieces of three. In that phase the census " +
-                "reports \"other, 3 cells\" twice. That is expected.";
+                "\"Settled\" means the counts have not changed, or have repeated in a short " +
+                "cycle, for 200 generations in a row. Gliders never stop on an infinite field, " +
+                "so a settled field can still have gliders flying across it.";
 
             // Enter/Space activates the census controls, same as a click
             // (needed for keyboard reachability -- these are <div>/<span>
@@ -988,10 +986,13 @@ var
             };
 
             // Run until settled: step the field 10 generations at a time,
-            // census after every batch, and stop once the census has not
-            // changed for 20 batches in a row (200 generations). The field
-            // and the table are redrawn after every batch so the student
-            // can watch it happen; the button reads "Stop" meanwhile.
+            // census after every batch, and stop once the last 20 censuses
+            // (200 generations) repeat with a cycle of at most 6 batches --
+            // cycle 1 is "unchanged"; a longer cycle means an oscillator the
+            // library does not know (period 3, 15, ...) is flipping between
+            // phases, which is still a settled field. The field and the
+            // table are redrawn after every batch so the student can watch
+            // it happen; the button reads "Stop" meanwhile.
             $("census_run_until_settled").onclick = function()
             {
                 if(census_running)
@@ -1010,10 +1011,11 @@ var
 
                 var CHECK_EVERY = 10;
                 var REQUIRED_STABLE_CHECKS = 20; // 20 x 10 = 200 generations
+                var MAX_CYCLE_CHECKS = 6;        // 6 x 10 = 60 generations
                 var MAX_GENERATIONS = 50000;
 
-                var lastSignature = null;
-                var stableChecks = 0;
+                var history = [];      // one census signature per check
+                var generationAt = []; // the generation each check was taken at
                 var generationsRun = 0;
 
                 // so Rewind takes the student back to the field before the run
@@ -1047,26 +1049,25 @@ var
                     }
 
                     var result = Census.census(get_live_cells(), life.generation);
-                    var sig = Census.signature(result);
 
-                    if(sig === lastSignature)
-                    {
-                        stableChecks++;
-                    }
-                    else
-                    {
-                        stableChecks = 0;
-                        lastSignature = sig;
-                    }
+                    history.push(Census.signature(result));
+                    generationAt.push(life.generation);
 
                     drawer.redraw(life.root);
                     update_hud();
 
-                    if(stableChecks >= REQUIRED_STABLE_CHECKS)
+                    var cycle = Census.settledCycle(history, REQUIRED_STABLE_CHECKS, MAX_CYCLE_CHECKS);
+
+                    if(cycle)
                     {
-                        finish(result, "Settled at generation " +
-                            (life.generation - REQUIRED_STABLE_CHECKS * CHECK_EVERY) +
-                            " (the counts stayed the same for 200 generations after that).");
+                        var since = generationAt[history.length - REQUIRED_STABLE_CHECKS - cycle];
+
+                        finish(result, cycle === 1 ?
+                            "Settled at generation " + since +
+                                " (the counts stayed the same for 200 generations after that)." :
+                            "Settled at generation " + since + ". Since then the counts have repeated " +
+                                "in a cycle of " + (cycle * CHECK_EVERY) + " generations, so an oscillator " +
+                                "the census cannot name is on the field. It is listed under \"other\".");
                         return;
                     }
 
@@ -1076,9 +1077,9 @@ var
                         return;
                     }
 
-                    render_census(result, "Running. The counts have not changed for " +
-                        (stableChecks * CHECK_EVERY) + " generations (needs 200 in a row). " +
-                        "Click Stop to stop early.");
+                    render_census(result, "Running. The counts have stayed the same (or repeated in a " +
+                        "short cycle) for " + (Census.stableRun(history, MAX_CYCLE_CHECKS) * CHECK_EVERY) +
+                        " generations (needs 200 in a row). Click Stop to stop early.");
 
                     // one batch per animation frame keeps the tab responsive
                     // and lets the student see the field evolve

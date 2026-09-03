@@ -15,16 +15,20 @@ Students randomize a large field, run it until it stops changing, and count what
 
 ## What is here
 
-- `census.js` — 8-connected grouping, symmetry-invariant canonical shape key, a plain-array
-  B3/S23 reference stepper, and a library seeded with one shape per object; every phase and
-  orientation is derived from the seed and verified at load. `require()`-able from node.
-- `test/census.test.js` — `node test/census.test.js` (framework-free; 160 assertions pass as
-  of the first build). Run it before every commit.
+- `census.js` — two-pass grouping (loose = cells within 2 steps; a loose group that is a
+  known object is named whole, otherwise it is split into strict 8-connected pieces and each
+  piece is named or goes to "other"), symmetry-invariant canonical shape key, a plain-array
+  B3/S23 reference stepper, a library seeded with one shape per object (15 objects incl.
+  pulsar, clock, LWSS; every phase and orientation derived from the seed and verified at
+  load), and `settledCycle`/`stableRun` for run-until-settled. `require()`-able from node.
+- `test/census.test.js` — `node test/census.test.js` (framework-free; 533 assertions pass as
+  of 2026-09-03). Run it before every commit.
 - `main.js` — `get_live_cells()` walks the hashlife root via `life.node_get_field`; the
   Census button, the `#census_dialog` panel, Recount, Save table (CSV download; generation
   in the file name and header rows), and Run until settled (one 10-generation batch per
-  animation frame, field and table redrawn after every batch; settled = 20 identical checks
-  in a row = 200 generations; cap 50,000; the button reads Stop while it runs).
+  animation frame, field and table redrawn after every batch; settled = the last 20 checks
+  (200 generations) repeat with a cycle ≤ 6 checks, cycle 1 = unchanged, cycle > 1 = an
+  unnamed oscillator is cycling; cap 50,000; the button reads Stop while it runs).
 - `index.html`, `life.css` — the button next to Randomize and the panel. The panel lives
   OUTSIDE `#overlay`, docked to the right edge (fixed, 300px) so the field stays visible;
   black on white. Buttons sit above the table so Stop is never below the fold.
@@ -39,11 +43,13 @@ Students randomize a large field, run it until it stops changing, and count what
 - **Browser verification** is scripted (`node test/browser-check.mjs`, 2026-09-03: a 120×120
   random field settled in ~7 s at ~600 generations/s). The instructor was also clicking
   through by hand on 2026-09-03. Serve with `python3 -m http.server 8080 --bind 0.0.0.0`.
-- **Lightweight spaceship (LWSS) is not in the library** — six seed attempts failed
-  verification and it was dropped rather than debugged. Its two phases are each 8-connected
-  (9 and 12 cells); a correct seed would add it.
-- **Beacon and toad** each have one phase that splits into two 3-cell pieces under strict
-  8-connectivity; that phase is reported as "other, 3 cells × 2". Documented in the README.
+- **Pentadecathlon (period 15) is not in the library**: in some phases its cells spread into
+  2–4 loose groups, so it could only be named in some phases. It lands under "other" and the
+  cycle check in run-until-settled copes with it (checked every 10 generations it cycles
+  every 3 checks). Any oscillator whose period in checks exceeds 6 would still never settle.
+- A known multi-piece object (pulsar, split-phase beacon/toad) that sits within one cell of
+  something else is not recognised whole; it degrades to its strict pieces (a pulsar then
+  shows as 8 blinkers etc. in some phases). Rare in settled ash, documented here only.
 - On an infinite field gliders never stop; "settled" still lists them. Correct, say so.
 
 ## Rules

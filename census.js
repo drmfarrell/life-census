@@ -2,8 +2,17 @@
  * census.js
  *
  * Census fork of copy.sh/life -- groups a field's live cells into
- * 8-connected components and names any component that matches a known
- * Game of Life object (still life, oscillator phase, or spaceship phase).
+ * objects and names any object that matches a known Game of Life shape
+ * (still life, oscillator phase, or spaceship phase).
+ *
+ * Grouping happens in two passes. First, cells within two steps of each
+ * other (so, bridging one empty cell) form a "loose" group; if the whole
+ * group is a known object it is named as one -- this is what lets a
+ * pulsar, whose four arms never touch, or a beacon in its split phase be
+ * counted as one object. A loose group that is not a known object is
+ * split into the pieces that actually touch (8-connected), and each
+ * piece is named on its own or reported as "other, N cells". Two blocks
+ * with a one-cell gap therefore still count as two blocks.
  *
  * Plain ES5/ES6. No dependencies. Works as a <script> in the browser
  * (exposes window.Census) and via require() in Node (module.exports).
@@ -78,18 +87,38 @@
         return next;
     }
 
-    var NEIGHBOR_OFFSETS = [
-        [-1, -1], [0, -1], [1, -1],
-        [-1, 0],           [1, 0],
-        [-1, 1],  [0, 1],  [1, 1]
-    ];
+    // Neighbour offsets for a given reach: reach 1 is the 8 touching
+    // cells (king move); reach 2 is every cell within two steps, which
+    // bridges a gap of one empty cell.
+    var OFFSETS_BY_REACH = {};
 
-    // Group live cells into 8-connected (king-move) components.
-    // Accepts either an array of {x,y} or two parallel arrays.
-    function connectedComponents(cellsOrX, maybeY)
+    function neighborOffsets(reach)
     {
-        var cells = toCellArray(cellsOrX, maybeY);
+        if(!OFFSETS_BY_REACH[reach])
+        {
+            var list = [];
 
+            for(var dy = -reach; dy <= reach; dy++)
+            {
+                for(var dx = -reach; dx <= reach; dx++)
+                {
+                    if(dx !== 0 || dy !== 0)
+                    {
+                        list.push([dx, dy]);
+                    }
+                }
+            }
+
+            OFFSETS_BY_REACH[reach] = list;
+        }
+
+        return OFFSETS_BY_REACH[reach];
+    }
+
+    // Group cells that are within `reach` steps of each other.
+    function groupCells(cells, reach)
+    {
+        var offsets = neighborOffsets(reach);
         var present = new Set();
         var i;
 
@@ -119,10 +148,10 @@
                 var cur = stack.pop();
                 comp.push({ x: cur.x, y: cur.y });
 
-                for(var j = 0; j < NEIGHBOR_OFFSETS.length; j++)
+                for(var j = 0; j < offsets.length; j++)
                 {
-                    var nx = cur.x + NEIGHBOR_OFFSETS[j][0];
-                    var ny = cur.y + NEIGHBOR_OFFSETS[j][1];
+                    var nx = cur.x + offsets[j][0];
+                    var ny = cur.y + offsets[j][1];
                     var nk = cellKey(nx, ny);
 
                     if(present.has(nk) && !visited.has(nk))
@@ -137,6 +166,19 @@
         }
 
         return components;
+    }
+
+    // Strict grouping: 8-connected (king-move) components, cells that touch.
+    // Accepts either an array of {x,y} or two parallel arrays.
+    function connectedComponents(cellsOrX, maybeY)
+    {
+        return groupCells(toCellArray(cellsOrX, maybeY), 1);
+    }
+
+    // Loose grouping: cells within two steps, bridging one empty cell.
+    function looseComponents(cellsOrX, maybeY)
+    {
+        return groupCells(toCellArray(cellsOrX, maybeY), 2);
     }
 
     function toCellArray(cellsOrX, maybeY)
@@ -218,13 +260,13 @@
         return best;
     }
 
-    // Build every distinct connected-single-component phase of a
-    // pattern starting from one seed, by stepping the reference
-    // implementation forward. Stops when a phase's canonical key
-    // repeats one already seen (oscillators/spaceships), or after
-    // maxPeriod steps. Phases where the pattern is not a single
-    // 8-connected component are skipped (e.g. beacon's split phase) --
-    // they are deliberately left unnamed and fall through to "other".
+    // Build every distinct phase of a pattern starting from one seed, by
+    // stepping the reference implementation forward. Stops when a phase's
+    // canonical key repeats one already seen (oscillators/spaceships), or
+    // after maxPeriod steps. A phase is only recorded when the pattern is
+    // a single loose group (every cell within two steps of another); a
+    // phase that spreads further apart is skipped and left unnamed.
+    // Returns [{ key, size }].
     function buildPhases(seedCells, maxPeriod)
     {
         var phases = [];
@@ -233,11 +275,11 @@
 
         for(var i = 0; i < maxPeriod; i++)
         {
-            var comps = connectedComponents(cells);
+            var groups = looseComponents(cells);
 
-            if(comps.length === 1)
+            if(groups.length === 1)
             {
-                var k = canonicalKey(comps[0]);
+                var k = canonicalKey(groups[0]);
 
                 if(seen.has(k))
                 {
@@ -245,13 +287,33 @@
                 }
 
                 seen.add(k);
-                phases.push(k);
+                phases.push({ key: k, size: groups[0].length });
             }
 
             cells = stepCells(cells);
         }
 
         return phases;
+    }
+
+    // Seeds are easier to check by eye as rows of "O" (live) and "."
+    // (dead), so larger objects are written that way.
+    function cellsFromRows(rows)
+    {
+        var cells = [];
+
+        rows.forEach(function(row, y)
+        {
+            for(var x = 0; x < row.length; x++)
+            {
+                if(row[x] === "O")
+                {
+                    cells.push({ x: x, y: y });
+                }
+            }
+        });
+
+        return cells;
     }
 
     // ---- Library of known objects -----------------------------------
@@ -301,25 +363,52 @@
             { x: 0, y: 0 }, { x: 1, y: 0 }, { x: 0, y: 1 },
             { x: 3, y: 2 }, { x: 2, y: 3 }, { x: 3, y: 3 }
         ] },
+        // period 3; its four arms never touch, so it is only one object
+        // thanks to loose grouping
+        { name: "pulsar", period: 6, cells: cellsFromRows([
+            "..OOO...OOO..",
+            ".............",
+            "O....O.O....O",
+            "O....O.O....O",
+            "O....O.O....O",
+            "..OOO...OOO..",
+            ".............",
+            "..OOO...OOO..",
+            "O....O.O....O",
+            "O....O.O....O",
+            "O....O.O....O",
+            ".............",
+            "..OOO...OOO.."
+        ]) },
+
+        { name: "clock", period: 4, cells: cellsFromRows([
+            "..O.",
+            "O.O.",
+            ".O.O",
+            ".O.."
+        ]) },
 
         // spaceships
         { name: "glider", period: 8, cells: [
             { x: 1, y: 0 }, { x: 2, y: 1 }, { x: 0, y: 2 }, { x: 1, y: 2 }, { x: 2, y: 2 }
-        ] }
+        ] },
+        { name: "lightweight spaceship", period: 8, cells: cellsFromRows([
+            ".O..O",
+            "O....",
+            "O...O",
+            "OOOO."
+        ]) }
 
-        // NOTE: a lightweight spaceship (LWSS) entry was attempted and
-        // dropped. Every seed tried either collapsed under evolution or
-        // came out as two disconnected 8-connected pieces (never a
-        // stable, steadily-translating single component), so it did not
-        // clear this file's own verification rule ("never guess a
-        // name"). A correctly-sourced LWSS seed can be added later --
-        // see the build log / verification pattern above for block and
-        // glider as the template.
+        // NOTE: the pentadecathlon (period 15) is deliberately absent.
+        // In some of its phases the cells spread into two to four loose
+        // groups, so it could only be named in some phases. It is
+        // reported under "other" and "run until settled" copes with it
+        // through the cycle check in settledCycle below.
     ];
 
-    // name -> canonical key -> already known to exist (for docs/debug)
     var LIBRARY = new Map(); // canonicalKey -> name
     var LIBRARY_BUILD_LOG = [];
+    var LIBRARY_MAX_CELLS = 0; // no group larger than this can be a known object
 
     LIBRARY_SEEDS.forEach(function(entry)
     {
@@ -327,11 +416,27 @@
 
         LIBRARY_BUILD_LOG.push({ name: entry.name, phaseCount: phases.length });
 
-        phases.forEach(function(k)
+        phases.forEach(function(phase)
         {
-            LIBRARY.set(k, entry.name);
+            LIBRARY.set(phase.key, entry.name);
+
+            if(phase.size > LIBRARY_MAX_CELLS)
+            {
+                LIBRARY_MAX_CELLS = phase.size;
+            }
         });
     });
+
+    // The library name for a group of cells, or undefined.
+    function lookupName(group)
+    {
+        if(group.length > LIBRARY_MAX_CELLS)
+        {
+            return undefined;
+        }
+
+        return LIBRARY.get(canonicalKey(group));
+    }
 
     // Order in which named objects should be listed: the five the lab
     // teaches first (in this order), then everything else alphabetically.
@@ -373,26 +478,60 @@
             gen = generation;
         }
 
-        var components = connectedComponents(cells);
+        var groups = looseComponents(cells);
 
         var speciesCounts = new Map(); // name -> count
         var otherCounts = new Map();   // cell count -> count
         var unidentifiedCells = 0;
+        var namedCells = 0;
 
-        for(var i = 0; i < components.length; i++)
+        function countNamed(name, size)
         {
-            var comp = components[i];
-            var k = canonicalKey(comp);
-            var name = LIBRARY.get(k);
+            speciesCounts.set(name, (speciesCounts.get(name) || 0) + 1);
+            namedCells += size;
+        }
+
+        function countOther(size)
+        {
+            otherCounts.set(size, (otherCounts.get(size) || 0) + 1);
+            unidentifiedCells += size;
+        }
+
+        for(var i = 0; i < groups.length; i++)
+        {
+            var group = groups[i];
+            var name = lookupName(group);
 
             if(name)
             {
-                speciesCounts.set(name, (speciesCounts.get(name) || 0) + 1);
+                countNamed(name, group.length);
+                continue;
             }
-            else
+
+            // Not a known object as a whole: fall back to the pieces that
+            // actually touch and name each of those on its own.
+            var pieces = groupCells(group, 1);
+
+            if(pieces.length === 1)
             {
-                otherCounts.set(comp.length, (otherCounts.get(comp.length) || 0) + 1);
-                unidentifiedCells += comp.length;
+                // same cells as the group, already known to be unnamed
+                countOther(group.length);
+                continue;
+            }
+
+            for(var j = 0; j < pieces.length; j++)
+            {
+                var piece = pieces[j];
+                var pieceName = lookupName(piece);
+
+                if(pieceName)
+                {
+                    countNamed(pieceName, piece.length);
+                }
+                else
+                {
+                    countOther(piece.length);
+                }
             }
         }
 
@@ -409,33 +548,103 @@
             population: cells.length,
             species: species,
             other: other,
+            named_cells: namedCells,
             unidentified_cells: unidentifiedCells
         };
     }
 
     // A compact signature of a census, used by "run until settled" to
-    // detect when the field has stopped changing shape-by-shape (note:
-    // on an infinite field a settled census can still contain gliders
-    // that keep flying -- their count and phase distribution is stable
-    // even though their coordinates are not).
+    // detect when the field has stopped changing object-by-object. It
+    // deliberately leaves out the population: a named oscillator such as
+    // a pulsar (48, 56 or 72 cells depending on phase) is the same object
+    // in every phase, and every real change shows up in the named counts
+    // or the "other" buckets anyway. (On an infinite field a settled
+    // census can still contain gliders that keep flying -- their count
+    // is stable even though their coordinates are not.)
     function signature(c)
     {
         var parts = [];
 
         c.species.forEach(function(s) { parts.push(s.name + ":" + s.count); });
         c.other.forEach(function(o) { parts.push("other" + o.cells + ":" + o.count); });
-        parts.push("pop:" + c.population);
 
         return parts.join("|");
     }
 
+    // ---- "Run until settled" support -------------------------------------
+    //
+    // history is the list of signatures taken at a fixed interval (every
+    // 10 generations in main.js). The field counts as settled when the
+    // last `window` entries each equal the entry `cycle` places earlier,
+    // for some cycle from 1 to maxCycle. Cycle 1 means the counts have
+    // not changed at all. A longer cycle means an oscillator the library
+    // does not know is flipping between phases in step with the checks
+    // (a period-3 object seen every 10 generations repeats every 3
+    // checks). Returns the cycle length, or 0 if not settled.
+    function settledCycle(history, window, maxCycle)
+    {
+        for(var cycle = 1; cycle <= maxCycle; cycle++)
+        {
+            if(history.length < window + cycle)
+            {
+                return 0;
+            }
+
+            var repeats = true;
+
+            for(var i = history.length - window; i < history.length; i++)
+            {
+                if(history[i] !== history[i - cycle])
+                {
+                    repeats = false;
+                    break;
+                }
+            }
+
+            if(repeats)
+            {
+                return cycle;
+            }
+        }
+
+        return 0;
+    }
+
+    // How many trailing entries of history repeat with some cycle of at
+    // most maxCycle: the "stable for N checks" figure shown while running.
+    function stableRun(history, maxCycle)
+    {
+        var best = 0;
+
+        for(var cycle = 1; cycle <= maxCycle; cycle++)
+        {
+            var run = 0;
+
+            for(var i = history.length - 1; i - cycle >= 0 && history[i] === history[i - cycle]; i--)
+            {
+                run++;
+            }
+
+            if(run > best)
+            {
+                best = run;
+            }
+        }
+
+        return best;
+    }
+
     return {
         connectedComponents: connectedComponents,
+        looseComponents: looseComponents,
         canonicalKey: canonicalKey,
+        cellsFromRows: cellsFromRows,
         stepCells: stepCells,
         buildPhases: buildPhases,
         census: census,
         signature: signature,
+        settledCycle: settledCycle,
+        stableRun: stableRun,
         library: LIBRARY,
         libraryBuildLog: LIBRARY_BUILD_LOG
     };

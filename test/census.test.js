@@ -84,8 +84,39 @@ var LIBRARY_TEST_PATTERNS = {
     "barge":   { seed: [{x:1,y:0},{x:0,y:1},{x:2,y:1},{x:1,y:2},{x:3,y:2},{x:2,y:3}], period: 1 },
     "blinker": { seed: [{x:0,y:1},{x:1,y:1},{x:2,y:1}], period: 2 },
     "toad":    { seed: [{x:1,y:0},{x:2,y:0},{x:3,y:0},{x:0,y:1},{x:1,y:1},{x:2,y:1}], period: 2 },
-    "glider":  { seed: [{x:1,y:0},{x:2,y:1},{x:0,y:2},{x:1,y:2},{x:2,y:2}], period: 4 }
+    "beacon":  { seed: [{x:0,y:0},{x:1,y:0},{x:0,y:1},{x:3,y:2},{x:2,y:3},{x:3,y:3}], period: 2 },
+    "clock":   { seed: Census.cellsFromRows(["..O.", "O.O.", ".O.O", ".O.."]), period: 2 },
+    "pulsar":  { seed: Census.cellsFromRows([
+        "..OOO...OOO..",
+        ".............",
+        "O....O.O....O",
+        "O....O.O....O",
+        "O....O.O....O",
+        "..OOO...OOO..",
+        ".............",
+        "..OOO...OOO..",
+        "O....O.O....O",
+        "O....O.O....O",
+        "O....O.O....O",
+        ".............",
+        "..OOO...OOO.."
+    ]), period: 3 },
+    // spaceships: after one period the seed reappears shifted by `shift`
+    "glider":  { seed: [{x:1,y:0},{x:2,y:1},{x:0,y:2},{x:1,y:2},{x:2,y:2}], period: 4, shift: {x: 1, y: 1} },
+    "lightweight spaceship": { seed: Census.cellsFromRows([".O..O", "O....", "O...O", "OOOO."]), period: 4, shift: {x: -2, y: 0} }
 };
+
+var BLOCK = LIBRARY_TEST_PATTERNS.block.seed;
+var BEEHIVE = LIBRARY_TEST_PATTERNS.beehive.seed;
+var BLINKER = LIBRARY_TEST_PATTERNS.blinker.seed;
+var PULSAR = LIBRARY_TEST_PATTERNS.pulsar.seed;
+
+function countsByName(result)
+{
+    var byName = {};
+    result.species.forEach(function(s) { byName[s.name] = s.count; });
+    return byName;
+}
 
 console.log("-- reference-implementation self-checks --");
 
@@ -99,12 +130,12 @@ Object.keys(LIBRARY_TEST_PATTERNS).forEach(function(name)
         cells = Census.stepCells(cells);
     }
 
-    if(name === "glider")
+    if(def.shift)
     {
-        // gliders translate; a translated copy of the seed is expected
-        var translatedBack = translate(cells, -1, -1);
+        // spaceships translate; a shifted copy of the seed is expected
+        var translatedBack = translate(cells, -def.shift.x, -def.shift.y);
         assert(cellsEqual(translatedBack, def.seed),
-            "glider should return to its seed shape (translated) after period " + def.period);
+            name + " should return to its seed shape (shifted) after period " + def.period);
     }
     else
     {
@@ -123,71 +154,183 @@ Object.keys(LIBRARY_TEST_PATTERNS).forEach(function(name)
 
     for(var step = 0; step < def.period; step++)
     {
-        var comps = Census.connectedComponents(cells);
+        // every phase of a library object must be one loose group
+        // (all cells within two steps of another), so it is named as
+        // one object even where its pieces do not touch
+        var groups = Census.looseComponents(cells);
 
-        // only check phases that are a single connected component --
-        // a phase that legitimately splits (e.g. beacon, toad) is not
-        // expected to be named, and is exercised separately below.
-        if(comps.length === 1)
+        assert(groups.length === 1, name + " phase " + step + " should be one loose group (got " + groups.length + ")");
+
+        if(groups.length === 1)
         {
             phasesChecked++;
 
             ORIENTATIONS.forEach(function(fn)
             {
-                var oriented = orient(comps[0], fn);
+                var oriented = orient(groups[0], fn);
                 var result = Census.census(oriented, 0);
 
-                assert(result.species.length === 1 && result.species[0].name === name,
-                    name + " phase " + step + " in orientation should be recognized as '" + name +
+                assert(result.species.length === 1 && result.species[0].name === name && result.species[0].count === 1,
+                    name + " phase " + step + " in orientation should be recognized as one '" + name +
                     "' (got: " + JSON.stringify(result.species) + ")");
+                assert(result.unidentified_cells === 0 && result.named_cells === oriented.length,
+                    name + " phase " + step + ": every cell should belong to the named object");
             });
         }
 
         cells = Census.stepCells(cells);
     }
 
-    assert(phasesChecked > 0, name + " should have at least one recognizable single-component phase");
+    assert(phasesChecked === def.period, name + ": all " + def.period + " phases should be named (" + phasesChecked + " were)");
 });
 
-// beacon: verify its 4-cell/4-cell whole phase is recognized, and its
-// split phase correctly reports two "other, 3 cells" pieces (documented
-// caveat: 8-connectivity genuinely disconnects this phase).
-console.log("-- beacon caveat: whole phase named, split phase reported as other --");
+// ---- loose grouping: split phases are one object; unknown groups fall back to pieces ----
+
+console.log("-- beacon and toad are one object in their split phase too --");
 
 (function()
 {
-    var beaconSplitSeed = [{x:0,y:0},{x:1,y:0},{x:0,y:1},{x:3,y:2},{x:2,y:3},{x:3,y:3}];
-    var whole = Census.stepCells(beaconSplitSeed);
-    var wholeCensus = Census.census(whole, 0);
+    var beaconSplit = [{x:0,y:0},{x:1,y:0},{x:0,y:1},{x:3,y:2},{x:2,y:3},{x:3,y:3}];
+    var r = Census.census(beaconSplit, 0);
 
-    assert(wholeCensus.species.length === 1 && wholeCensus.species[0].name === "beacon",
-        "beacon's connected phase should be recognized as 'beacon'");
+    assert(r.species.length === 1 && r.species[0].name === "beacon" && r.species[0].count === 1,
+        "beacon's split phase should count as one beacon (got: " + JSON.stringify(r.species) + ")");
+    assert(r.other.length === 0 && r.unidentified_cells === 0, "beacon's split phase should leave nothing under 'other'");
 
-    var splitCensus = Census.census(beaconSplitSeed, 1);
+    var toadSplit = Census.stepCells(LIBRARY_TEST_PATTERNS.toad.seed);
+    r = Census.census(toadSplit, 1);
 
-    assert(splitCensus.species.length === 0,
-        "beacon's split phase should not be named");
-    assert(splitCensus.other.length === 1 && splitCensus.other[0].cells === 3 && splitCensus.other[0].count === 2,
-        "beacon's split phase should report as other, 3 cells x 2 (got: " + JSON.stringify(splitCensus.other) + ")");
+    assert(r.species.length === 1 && r.species[0].name === "toad" && r.species[0].count === 1,
+        "toad's split phase should count as one toad (got: " + JSON.stringify(r.species) + ")");
+    assert(r.other.length === 0, "toad's split phase should leave nothing under 'other'");
 })();
 
-// toad has the same caveat as beacon.
-console.log("-- toad caveat: whole phase named, split phase reported as other --");
+console.log("-- unknown loose groups fall back to the pieces that touch --");
 
 (function()
 {
-    var toad = [{x:1,y:0},{x:2,y:0},{x:3,y:0},{x:0,y:1},{x:1,y:1},{x:2,y:1}];
-    var wholeCensus = Census.census(toad, 0);
+    // bi-block: two blocks with a one-cell gap are within loose reach
+    var r = Census.census(BLOCK.concat(translate(BLOCK, 3, 0)), 0);
 
-    assert(wholeCensus.species.length === 1 && wholeCensus.species[0].name === "toad",
-        "toad's connected phase should be recognized as 'toad'");
+    assert(countsByName(r).block === 2, "two blocks one cell apart should count as 2 blocks (got: " + JSON.stringify(r.species) + ")");
+    assert(r.other.length === 0, "two blocks one cell apart should leave nothing under 'other'");
 
-    var split = Census.stepCells(toad);
-    var splitCensus = Census.census(split, 1);
+    // block beside a beehive with a one-cell gap
+    r = Census.census(BLOCK.concat(translate(BEEHIVE, 3, 0)), 0);
 
-    assert(splitCensus.species.length === 0, "toad's split phase should not be named");
-    assert(splitCensus.other.length === 1 && splitCensus.other[0].cells === 3 && splitCensus.other[0].count === 2,
-        "toad's split phase should report as other, 3 cells x 2 (got: " + JSON.stringify(splitCensus.other) + ")");
+    assert(countsByName(r).block === 1 && countsByName(r).beehive === 1 && r.other.length === 0,
+        "a block one cell from a beehive should count as 1 block + 1 beehive (got: " + JSON.stringify(r) + ")");
+
+    // two L-triominoes far apart are not a beacon: still other, 3 cells x 2
+    var tri = [{x:0,y:0},{x:1,y:0},{x:0,y:1}];
+    r = Census.census(tri.concat(translate(tri, 10, 10)), 0);
+
+    assert(r.species.length === 0 && r.other.length === 1 && r.other[0].cells === 3 && r.other[0].count === 2,
+        "two separate 3-cell pieces should stay other, 3 cells x 2 (got: " + JSON.stringify(r) + ")");
+
+    // a pulsar with a block one cell away is not a known object as a whole:
+    // the block is still named via the fallback and every cell is accounted for
+    r = Census.census(PULSAR.concat(translate(BLOCK, 14, 0)), 0);
+
+    assert(countsByName(r).block === 1, "a block crowding a pulsar should still be named (got: " + JSON.stringify(r.species) + ")");
+    assert(r.named_cells + r.unidentified_cells === r.population, "crowded pulsar: every cell should be named or under 'other'");
+})();
+
+console.log("-- pulsar is one object in every phase and does not inflate other counts --");
+
+(function()
+{
+    var cells = PULSAR;
+    var field;
+
+    for(var phase = 0; phase < 3; phase++)
+    {
+        var r = Census.census(cells, phase);
+        var byName = countsByName(r);
+
+        assert(byName.pulsar === 1 && r.species.length === 1,
+            "pulsar phase " + phase + " should count as exactly one pulsar (got: " + JSON.stringify(r.species) + ")");
+        assert(r.unidentified_cells === 0, "pulsar phase " + phase + " should leave nothing under 'other'");
+
+        // pulsar plus two real blinkers: the blinker count stays 2 in every phase
+        field = cells.concat(translate(BLINKER, 30, 0), translate(BLINKER, 30, 10));
+        byName = countsByName(Census.census(field, phase));
+
+        assert(byName.blinker === 2 && byName.pulsar === 1,
+            "pulsar phase " + phase + " with two blinkers: expected blinker 2, pulsar 1 (got: " + JSON.stringify(byName) + ")");
+
+        cells = Census.stepCells(cells);
+        field = Census.stepCells(field);
+    }
+})();
+
+// ---- settled detection: unchanged counts, short cycles, still changing ----
+
+console.log("-- settledCycle and stableRun --");
+
+(function()
+{
+    var W = 20, MAXC = 6, i;
+
+    var same = [];
+    for(i = 0; i < 25; i++) same.push("A");
+
+    assert(Census.settledCycle(same, W, MAXC) === 1, "unchanged counts should settle with cycle 1");
+    assert(Census.settledCycle(same.slice(0, 20), W, MAXC) === 0, "settling needs window + 1 checks");
+    assert(Census.settledCycle(same.slice(0, 21), W, MAXC) === 1, "settles at exactly window + 1 checks");
+    assert(Census.stableRun(same, MAXC) === 24, "stableRun of 25 identical checks should be 24");
+
+    var p3 = [];
+    for(i = 0; i < 30; i++) p3.push("ABC"[i % 3]);
+
+    assert(Census.settledCycle(p3, W, MAXC) === 3, "a 3-check cycle should settle with cycle 3");
+    assert(Census.settledCycle(p3, W, 2) === 0, "a 3-check cycle is not settled when maxCycle is 2");
+    assert(Census.stableRun(p3, MAXC) === 27, "stableRun of a 3-check cycle over 30 checks should be 27");
+
+    var changing = [];
+    for(i = 0; i < 40; i++) changing.push("s" + i);
+
+    assert(Census.settledCycle(changing, W, MAXC) === 0, "ever-changing counts should not settle");
+    assert(Census.stableRun(changing, MAXC) === 0, "ever-changing counts should have stableRun 0");
+
+    var settling = changing.concat(["Z", "Z", "Z", "Z", "Z", "Z"]);
+    assert(Census.stableRun(settling, MAXC) === 5, "six identical trailing checks should give stableRun 5");
+
+    // real run: a pulsar and a beacon, census every 10 generations for 300
+    // generations -- both are named in every phase, so the counts never change
+    var field = PULSAR.concat(translate(LIBRARY_TEST_PATTERNS.beacon.seed, 30, 0));
+    var history = [];
+
+    for(var g = 1; g <= 300; g++)
+    {
+        field = Census.stepCells(field);
+
+        if(g % 10 === 0)
+        {
+            history.push(Census.signature(Census.census(field, g)));
+        }
+    }
+
+    assert(Census.settledCycle(history, W, MAXC) === 1, "pulsar + beacon should settle with cycle 1 (got " + Census.settledCycle(history, W, MAXC) + ")");
+
+    // an oscillator the library does not know: the pentadecathlon (period 15)
+    // seen every 10 generations cycles through 3 distinct phases
+    field = Census.cellsFromRows(["..O....O..", "OO.OOOO.OO", "..O....O.."]);
+    history = [];
+
+    for(g = 1; g <= 400; g++)
+    {
+        field = Census.stepCells(field);
+
+        if(g % 10 === 0)
+        {
+            history.push(Census.signature(Census.census(field, g)));
+        }
+    }
+
+    var cycle = Census.settledCycle(history, W, MAXC);
+    assert(cycle === 3, "a pentadecathlon should settle with a 3-check cycle (got " + cycle + ")");
+    assert(Census.settledCycle(history, W, 1) === 0, "a pentadecathlon never settles when only cycle 1 is allowed");
 })();
 
 // ---- 2. mixed field: 3 blocks + 2 blinkers (each phase) + 1 glider + 1 beehive ----
@@ -273,11 +416,10 @@ console.log("-- random field cell-conservation check --");
         "sum of component sizes should equal total live cells");
 
     var otherCells = result.other.reduce(function(sum, o) { return sum + o.cells * o.count; }, 0);
-    var namedComponentCount = result.species.reduce(function(sum, s) { return sum + s.count; }, 0);
-    var otherComponentCount = result.other.reduce(function(sum, o) { return sum + o.count; }, 0);
 
-    assert(namedComponentCount + otherComponentCount === comps.length,
-        "every component should be either named or counted in 'other'");
+    assert(result.named_cells + result.unidentified_cells === result.population,
+        "every cell should be in a named object or under 'other' (" +
+        result.named_cells + " + " + result.unidentified_cells + " vs " + result.population + ")");
 
     assert(result.unidentified_cells === otherCells,
         "unidentified_cells should equal the sum of other-group cells (" +
