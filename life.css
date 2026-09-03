@@ -220,3 +220,46 @@ br.clear {
     overflow: hidden;
     text-overflow: ellipsis;
 }
+
+/* Census panel: black on white, high contrast (>= 4.5:1) per lab
+   accessibility requirements, independent of the app's dark theme. */
+#census_dialog {
+    background-color: #fff;
+    color: #000;
+}
+#census_dialog h2 {
+    color: #000;
+}
+#census_table {
+    border-collapse: collapse;
+    width: 100%;
+    margin: 10px 0;
+    background-color: #fff;
+    color: #000;
+}
+#census_table caption {
+    text-align: left;
+    font-weight: bold;
+}
+#census_table th, #census_table td {
+    border: 1px solid #000;
+    padding: 4px 10px;
+    text-align: left;
+}
+#census_table th {
+    background-color: #eee;
+}
+#census_dialog .button2 {
+    border: 1px solid #000;
+    color: #000;
+}
+#census_dialog .button2:hover {
+    background-color: #ddd;
+}
+#census_summary, #census_note {
+    color: #000;
+}
+#census_note {
+    font-size: 90%;
+    margin-top: 10px;
+}

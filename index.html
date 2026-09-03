@@ -10,6 +10,7 @@
 <script src="formats.js"></script>
 <script src="draw.js"></script>
 <script src="macrocell.js"></script>
+<script src="census.js"></script>
 <script src="main.js"></script>
 </head>
 <body>
@@ -20,6 +21,7 @@
         <div id="pattern_button">Patterns</div>
     </div>
     <div id="randomize_button" class="button">Randomize</div>
+    <div id="census_button" class="button" tabindex="0" role="button" aria-label="Take a census of the current field">Census</div>
     <div id="export_button" class="button">Export</div>
     <div id="import_button" class="button">Import</div>
     <div class="button" id="settings_button">Settings</div>
@@ -147,6 +149,21 @@
         <br>
         <span id="randomize_submit" class="button2">Randomize</span>
         <span id="randomize_abort" class="button2">Abort</span>
+    </div>
+    <div id="census_dialog" style="display: none;">
+        <h2>Census</h2>
+        <div id="census_summary"></div>
+        <table id="census_table" tabindex="0">
+            <thead>
+                <tr><th scope="col">Object</th><th scope="col">Count</th></tr>
+            </thead>
+            <tbody id="census_table_body"></tbody>
+        </table>
+        <div id="census_note"></div>
+        <br>
+        <span id="census_run_until_settled" class="button2" tabindex="0" role="button">Run until settled</span>
+        <span id="census_recount" class="button2" tabindex="0" role="button">Recount now</span>
+        <span id="census_close" class="button2" tabindex="0" role="button">Close</span>
     </div>
     <div id="import_dialog" style="display: none;">
         <h2>Import Pattern</h2>

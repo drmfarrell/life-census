@@ -843,6 +843,187 @@ var
                 show_overlay("randomize_dialog");
             };
 
+            // -- Census (teaching fork) --------------------------------
+            //
+            // Reads every live cell straight out of the quadtree (the
+            // same traversal the RLE exporter uses via node_get_field),
+            // groups them into 8-connected objects, and names the ones
+            // that match the still-life/oscillator/spaceship library in
+            // census.js.
+
+            function get_live_cells()
+            {
+                var offset = life.pow2(life.root.level - 1);
+                var field = [];
+
+                life.node_get_field(life.root, -offset, -offset, field);
+
+                return field;
+            }
+
+            function render_census(result, note)
+            {
+                var rows = [];
+
+                result.species.forEach(function(s)
+                {
+                    rows.push("<tr><td>" + s.name + "</td><td>" + s.count + "</td></tr>");
+                });
+
+                result.other.forEach(function(o)
+                {
+                    rows.push("<tr><td>other, " + o.cells + " cells</td><td>" + o.count + "</td></tr>");
+                });
+
+                $("census_table_body").innerHTML = rows.length ? rows.join("") :
+                    "<tr><td colspan=\"2\">Nothing on the field.</td></tr>";
+
+                set_text($("census_summary"),
+                    "Population: " + result.population + "    Generation: " + result.generation +
+                    (result.unidentified_cells ? "    (" + result.unidentified_cells + " unidentified cells)" : ""));
+
+                $("census_note").textContent = note || "";
+            }
+
+            var CENSUS_NOTE_DEFAULT =
+                "A field is only counted as \"settled\" when its census (which objects, " +
+                "and how many of each) stops changing for 200 generations in a row. On an " +
+                "infinite field, gliders and other spaceships keep flying forever -- a " +
+                "settled field can still contain moving gliders. That is correct: their " +
+                "count and phase pattern have stopped changing even though their position " +
+                "has not. Beacon and toad each have one phase where the six cells split into " +
+                "two separate three-cell pieces (checked corner to corner, not edge to edge) " +
+                "-- that phase is reported as \"other, 3 cells\" x 2, which is expected.";
+
+            // Enter/Space activates the census controls, same as a click
+            // (needed for keyboard reachability -- these are <div>/<span>
+            // elements, not native <button>s, matching the rest of the app).
+            [
+                "census_button", "census_run_until_settled",
+                "census_recount", "census_close"
+            ].forEach(function(id)
+            {
+                $(id).onkeydown = function(e)
+                {
+                    if(e.key === "Enter" || e.key === " " || e.key === "Spacebar")
+                    {
+                        e.preventDefault();
+                        this.click();
+                    }
+                };
+            });
+
+            $("census_button").onclick = function()
+            {
+                var result = Census.census(get_live_cells(), life.generation);
+
+                render_census(result, CENSUS_NOTE_DEFAULT);
+
+                show_overlay("census_dialog");
+            };
+
+            $("census_recount").onclick = function()
+            {
+                var result = Census.census(get_live_cells(), life.generation);
+
+                render_census(result, CENSUS_NOTE_DEFAULT);
+            };
+
+            $("census_close").onclick = function()
+            {
+                hide_overlay();
+            };
+
+            var census_running = false;
+
+            $("census_run_until_settled").onclick = function()
+            {
+                if(census_running)
+                {
+                    return;
+                }
+
+                census_running = true;
+                set_text($("census_run_until_settled"), "Running…");
+
+                var CHECK_EVERY = 10;
+                var REQUIRED_STABLE_CHECKS = 20; // 20 x 10 = 200 generations
+                var MAX_GENERATIONS = 50000;
+
+                var startGeneration = life.generation;
+                var lastSignature = null;
+                var stableChecks = 0;
+                var generationsRun = 0;
+
+                function finish(settled, atGeneration)
+                {
+                    census_running = false;
+                    set_text($("census_run_until_settled"), "Run until settled");
+
+                    var result = Census.census(get_live_cells(), life.generation);
+                    var note;
+
+                    if(settled)
+                    {
+                        note = "Settled at generation " + atGeneration + " (census unchanged for 200 " +
+                            "generations). " + CENSUS_NOTE_DEFAULT;
+                    }
+                    else
+                    {
+                        note = "Still changing after " + MAX_GENERATIONS + " generations. " + CENSUS_NOTE_DEFAULT;
+                    }
+
+                    render_census(result, note);
+
+                    drawer.redraw(life.root);
+                    update_hud();
+                }
+
+                function runBatch()
+                {
+                    for(var i = 0; i < CHECK_EVERY; i++)
+                    {
+                        life.next_generation(true);
+                        generationsRun++;
+                    }
+
+                    var result = Census.census(get_live_cells(), life.generation);
+                    var sig = Census.signature(result);
+
+                    if(sig === lastSignature)
+                    {
+                        stableChecks++;
+                    }
+                    else
+                    {
+                        stableChecks = 0;
+                        lastSignature = sig;
+                    }
+
+                    if(stableChecks >= REQUIRED_STABLE_CHECKS)
+                    {
+                        finish(true, life.generation - (REQUIRED_STABLE_CHECKS - 1) * CHECK_EVERY);
+                        return;
+                    }
+
+                    if(generationsRun >= MAX_GENERATIONS)
+                    {
+                        finish(false);
+                        return;
+                    }
+
+                    // yield to the browser between batches so the tab stays responsive
+                    setTimeout(runBatch, 0);
+                }
+
+                if(life.generation === startGeneration)
+                {
+                    life.save_rewind_state();
+                }
+
+                runBatch();
+            };
+
             $("randomize_submit").onclick = function()
             {
                 const density = Math.max(0, Math.min(1, +$("randomize_density").value)) || 0.5;
