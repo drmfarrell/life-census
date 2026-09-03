@@ -15,8 +15,12 @@ recognize is reported as "other" and grouped by how many cells it has. Census
 never guesses a name -- if a shape isn't in its library, it says so honestly
 instead of pretending.
 
-**The two-click student path**: click **Randomize** to fill the field, then
-**Run until settled**, then read the census panel. "Settled" means the count of
+**The student path**: click **Randomize** to fill the field, then **Census**,
+then **Run until settled**. The census panel sits on the right of the screen,
+so you can watch the field change while it runs. Click **Stop** to stop early.
+When it stops, read the table. **Save table** downloads the counts as a .csv
+file that opens in Excel or Google Sheets; the generation number is in the file
+name and in the first rows of the file. "Settled" means the count of
 each object has stopped changing for 200 generations in a row -- it does
 *not* mean everything has stopped moving. On an infinite field, gliders (and
 other spaceships) keep flying forever, so a settled field can still have

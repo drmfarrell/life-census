@@ -630,6 +630,7 @@ var
                 {
                     // escape
                     hide_overlay();
+                    hide_census_panel();
                     return false;
                 }
                 else if(chr === 13)
@@ -886,21 +887,18 @@ var
             }
 
             var CENSUS_NOTE_DEFAULT =
-                "A field is only counted as \"settled\" when its census (which objects, " +
-                "and how many of each) stops changing for 200 generations in a row. On an " +
-                "infinite field, gliders and other spaceships keep flying forever -- a " +
-                "settled field can still contain moving gliders. That is correct: their " +
-                "count and phase pattern have stopped changing even though their position " +
-                "has not. Beacon and toad each have one phase where the six cells split into " +
-                "two separate three-cell pieces (checked corner to corner, not edge to edge) " +
-                "-- that phase is reported as \"other, 3 cells\" x 2, which is expected.";
+                "\"Settled\" means the counts have not changed for 200 generations in a row. " +
+                "Gliders never stop on an infinite field, so a settled field can still have " +
+                "gliders flying across it. Beacon and toad each have a phase where their six " +
+                "cells split into two separate pieces of three. In that phase the census " +
+                "reports \"other, 3 cells\" twice. That is expected.";
 
             // Enter/Space activates the census controls, same as a click
             // (needed for keyboard reachability -- these are <div>/<span>
             // elements, not native <button>s, matching the rest of the app).
             [
                 "census_button", "census_run_until_settled",
-                "census_recount", "census_close"
+                "census_recount", "census_export", "census_close"
             ].forEach(function(id)
             {
                 $(id).onkeydown = function(e)
@@ -908,6 +906,9 @@ var
                     if(e.key === "Enter" || e.key === " " || e.key === "Spacebar")
                     {
                         e.preventDefault();
+                        // stop here: the window handler would otherwise
+                        // treat Enter as a click on the Run button
+                        e.stopPropagation();
                         this.click();
                     }
                 };
@@ -915,65 +916,116 @@ var
 
             $("census_button").onclick = function()
             {
-                var result = Census.census(get_live_cells(), life.generation);
+                render_census(Census.census(get_live_cells(), life.generation), CENSUS_NOTE_DEFAULT);
+                set_text($("census_status"), "");
 
-                render_census(result, CENSUS_NOTE_DEFAULT);
-
-                show_overlay("census_dialog");
+                show_census_panel();
             };
 
             $("census_recount").onclick = function()
             {
-                var result = Census.census(get_live_cells(), life.generation);
-
-                render_census(result, CENSUS_NOTE_DEFAULT);
+                render_census(Census.census(get_live_cells(), life.generation), CENSUS_NOTE_DEFAULT);
             };
 
             $("census_close").onclick = function()
             {
-                hide_overlay();
+                hide_census_panel();
             };
 
-            var census_running = false;
+            // Save table: a CSV file that opens in Excel or Google Sheets.
+            // The generation number goes in the file name and in the header
+            // rows at the top of the file. Works from file:// too.
+            function csv_field(value)
+            {
+                var text = String(value);
 
+                return /[",\r\n]/.test(text) ? "\"" + text.replace(/"/g, "\"\"") + "\"" : text;
+            }
+
+            $("census_export").onclick = function()
+            {
+                // count afresh so the file always matches the field
+                var result = Census.census(get_live_cells(), life.generation);
+                render_census(result, CENSUS_NOTE_DEFAULT);
+
+                var rows = [
+                    ["Game of Life census"],
+                    ["Generation", result.generation],
+                    ["Population", result.population],
+                    ["Unidentified cells", result.unidentified_cells || 0],
+                    ["Saved", new Date().toLocaleString()],
+                    [],
+                    ["Object", "Count"]
+                ];
+
+                result.species.forEach(function(s)
+                {
+                    rows.push([s.name, s.count]);
+                });
+
+                result.other.forEach(function(o)
+                {
+                    rows.push(["other, " + o.cells + " cells", o.count]);
+                });
+
+                var csv = rows.map(function(row)
+                {
+                    return row.map(csv_field).join(",");
+                }).join("\r\n") + "\r\n";
+
+                var file_name = "census-generation-" + result.generation + ".csv";
+                var link = document.createElement("a");
+
+                link.href = URL.createObjectURL(new Blob([csv], { type: "text/csv" }));
+                link.download = file_name;
+                document.body.appendChild(link);
+                link.click();
+                document.body.removeChild(link);
+                setTimeout(function() { URL.revokeObjectURL(link.href); }, 1000);
+
+                set_text($("census_status"), "Saved " + file_name + " to your Downloads folder. " +
+                    "It opens in Excel or Google Sheets.");
+            };
+
+            // Run until settled: step the field 10 generations at a time,
+            // census after every batch, and stop once the census has not
+            // changed for 20 batches in a row (200 generations). The field
+            // and the table are redrawn after every batch so the student
+            // can watch it happen; the button reads "Stop" meanwhile.
             $("census_run_until_settled").onclick = function()
             {
                 if(census_running)
                 {
+                    census_stop_requested = true;
                     return;
                 }
 
+                // the app's own Run loop must not step the field at the same time
+                stop();
+
                 census_running = true;
-                set_text($("census_run_until_settled"), "Running…");
+                census_stop_requested = false;
+                set_text($("census_run_until_settled"), "Stop");
+                set_text($("census_status"), "Running. Watch the field change.");
 
                 var CHECK_EVERY = 10;
                 var REQUIRED_STABLE_CHECKS = 20; // 20 x 10 = 200 generations
                 var MAX_GENERATIONS = 50000;
 
-                var startGeneration = life.generation;
                 var lastSignature = null;
                 var stableChecks = 0;
                 var generationsRun = 0;
 
-                function finish(settled, atGeneration)
+                // so Rewind takes the student back to the field before the run
+                life.save_rewind_state();
+
+                function finish(result, outcome)
                 {
                     census_running = false;
                     set_text($("census_run_until_settled"), "Run until settled");
 
-                    var result = Census.census(get_live_cells(), life.generation);
-                    var note;
-
-                    if(settled)
-                    {
-                        note = "Settled at generation " + atGeneration + " (census unchanged for 200 " +
-                            "generations). " + CENSUS_NOTE_DEFAULT;
-                    }
-                    else
-                    {
-                        note = "Still changing after " + MAX_GENERATIONS + " generations. " + CENSUS_NOTE_DEFAULT;
-                    }
-
-                    render_census(result, note);
+                    render_census(result, outcome + " " + CENSUS_NOTE_DEFAULT);
+                    set_text($("census_status"), outcome);
 
                     drawer.redraw(life.root);
                     update_hud();
@@ -981,6 +1033,13 @@ var
 
                 function runBatch()
                 {
+                    if(census_stop_requested)
+                    {
+                        finish(Census.census(get_live_cells(), life.generation),
+                            "Stopped at generation " + life.generation + ".");
+                        return;
+                    }
+
                     for(var i = 0; i < CHECK_EVERY; i++)
                     {
                         life.next_generation(true);
@@ -1000,25 +1059,30 @@ var
                         lastSignature = sig;
                     }
 
+                    drawer.redraw(life.root);
+                    update_hud();
+
                     if(stableChecks >= REQUIRED_STABLE_CHECKS)
                     {
-                        finish(true, life.generation - (REQUIRED_STABLE_CHECKS - 1) * CHECK_EVERY);
+                        finish(result, "Settled at generation " +
+                            (life.generation - REQUIRED_STABLE_CHECKS * CHECK_EVERY) +
+                            " (the counts stayed the same for 200 generations after that).");
                         return;
                     }
 
                     if(generationsRun >= MAX_GENERATIONS)
                     {
-                        finish(false);
+                        finish(result, "Still changing after " + MAX_GENERATIONS + " generations.");
                         return;
                     }
 
-                    // yield to the browser between batches so the tab stays responsive
-                    setTimeout(runBatch, 0);
-                }
+                    render_census(result, "Running. The counts have not changed for " +
+                        (stableChecks * CHECK_EVERY) + " generations (needs 200 in a row). " +
+                        "Click Stop to stop early.");
 
-                if(life.generation === startGeneration)
-                {
-                    life.save_rewind_state();
+                    // one batch per animation frame keeps the tab responsive
+                    // and lets the student see the field evolve
+                    nextFrame(runBatch);
                 }
 
                 runBatch();
@@ -1203,7 +1267,12 @@ var
                     show_overlay("loading_popup");
                     http_get(pattern_path + "list", function(text)
                     {
-                        var patterns = text.split("\n"),
+                        // one "<name> <size>" per line; skip blank lines so a
+                        // trailing newline does not add an empty entry
+                        var patterns = text.split("\n").filter(function(line)
+                            {
+                                return line.trim() !== "";
+                            }),
                             list = $("pattern_list");
 
                         show_overlay("pattern_chooser");
@@ -1237,6 +1306,14 @@ var
                                 });
                             };
                         });
+                    },
+                    function()
+                    {
+                        // examples/list missing or unreachable: say so instead
+                        // of leaving the "loading" popup up forever
+                        hide_overlay();
+                        patterns_loaded = false;
+                        window.alert("Could not load the pattern list (" + pattern_path + "list).");
                     });
                 }
             }
@@ -1622,6 +1699,24 @@ var
     {
         hide_element($("overlay"));
         document.body.style.overflow = "hidden";
+    }
+
+    // The census panel lives outside #overlay: it is docked on the right
+    // of the screen so the field stays visible while it runs.
+    var census_running = false;
+    var census_stop_requested = false;
+
+    function show_census_panel()
+    {
+        show_element($("census_dialog"));
+        $("census_dialog").focus();
+    }
+
+    function hide_census_panel()
+    {
+        // closing the panel also ends a run in progress
+        census_stop_requested = true;
+        hide_element($("census_dialog"));
     }
 
     /**

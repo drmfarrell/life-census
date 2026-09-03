@@ -68,6 +68,24 @@
     <div id="label_step" title="Generation per Step">1</div>
     <span id="pattern_name" class="link" title="Pattern infos"></span>
 </div>
+<div id="census_dialog" style="display: none;" tabindex="-1" role="region" aria-label="Census">
+    <h2>Census</h2>
+    <div id="census_status" aria-live="polite"></div>
+    <div id="census_buttons">
+        <span id="census_run_until_settled" class="button2" tabindex="0" role="button">Run until settled</span>
+        <span id="census_recount" class="button2" tabindex="0" role="button">Recount now</span>
+        <span id="census_export" class="button2" tabindex="0" role="button" title="Saves a .csv file that opens in Excel or Google Sheets">Save table</span>
+        <span id="census_close" class="button2" tabindex="0" role="button">Close</span>
+    </div>
+    <div id="census_summary"></div>
+    <table id="census_table" tabindex="0">
+        <thead>
+            <tr><th scope="col">Object</th><th scope="col">Count</th></tr>
+        </thead>
+        <tbody id="census_table_body"></tbody>
+    </table>
+    <div id="census_note"></div>
+</div>
 <div id="overlay">
     <div id="about">
         <h2>Conway's Game of Life in JavaScript</h2>
@@ -149,21 +167,6 @@
         <br>
         <span id="randomize_submit" class="button2">Randomize</span>
         <span id="randomize_abort" class="button2">Abort</span>
-    </div>
-    <div id="census_dialog" style="display: none;">
-        <h2>Census</h2>
-        <div id="census_summary"></div>
-        <table id="census_table" tabindex="0">
-            <thead>
-                <tr><th scope="col">Object</th><th scope="col">Count</th></tr>
-            </thead>
-            <tbody id="census_table_body"></tbody>
-        </table>
-        <div id="census_note"></div>
-        <br>
-        <span id="census_run_until_settled" class="button2" tabindex="0" role="button">Run until settled</span>
-        <span id="census_recount" class="button2" tabindex="0" role="button">Recount now</span>
-        <span id="census_close" class="button2" tabindex="0" role="button">Close</span>
     </div>
     <div id="import_dialog" style="display: none;">
         <h2>Import Pattern</h2>

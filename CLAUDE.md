@@ -21,18 +21,24 @@ Students randomize a large field, run it until it stops changing, and count what
 - `test/census.test.js` — `node test/census.test.js` (framework-free; 160 assertions pass as
   of the first build). Run it before every commit.
 - `main.js` — `get_live_cells()` walks the hashlife root via `life.node_get_field`; the
-  Census button, the `#census_dialog` panel, Recount, and Run until settled (census every 10
-  generations; settled = 20 identical checks in a row = 200 generations; cap 50,000).
-- `index.html`, `life.css` — the button next to Randomize and the panel, black on white.
+  Census button, the `#census_dialog` panel, Recount, Save table (CSV download; generation
+  in the file name and header rows), and Run until settled (one 10-generation batch per
+  animation frame, field and table redrawn after every batch; settled = 20 identical checks
+  in a row = 200 generations; cap 50,000; the button reads Stop while it runs).
+- `index.html`, `life.css` — the button next to Randomize and the panel. The panel lives
+  OUTSIDE `#overlay`, docked to the right edge (fixed, 300px) so the field stays visible;
+  black on white. Buttons sit above the table so Stop is never below the fold.
+- `test/browser-check.mjs` — `node test/browser-check.mjs` drives the student path in a
+  headless Chromium over the DevTools protocol (no npm deps; uses Playwright's cached
+  browser binary, override with `CHROME=/path/to/chrome`). Prints PASS/FAIL per step.
+- `examples/list` — hand-maintained index for the Patterns button (one `file.rle` per line,
+  see the parser in `main.js`); add a line when adding an RLE to `examples/`.
 
 ## Known gaps
 
-- **Not yet verified in a real browser end to end.** Node tests cover the census logic; the
-  UI wiring was checked by code review and an HTTP smoke test only. Headless Firefox on the
-  Linux box could not screenshot. First job: open http://localhost:8080/ (serve with
-  `python3 -m http.server 8080 --bind 0.0.0.0` from this folder) and click through the
-  student path. A driver page that scripts the iframe (randomize → submit → census → run
-  until settled) is a fine way to automate it once a headless browser is available.
+- **Browser verification** is scripted (`node test/browser-check.mjs`, 2026-09-03: a 120×120
+  random field settled in ~7 s at ~600 generations/s). The instructor was also clicking
+  through by hand on 2026-09-03. Serve with `python3 -m http.server 8080 --bind 0.0.0.0`.
 - **Lightweight spaceship (LWSS) is not in the library** — six seed attempts failed
   verification and it was dropped rather than debugged. Its two phases are each 8-connected
   (9 and 12 cells); a correct seed would add it.
